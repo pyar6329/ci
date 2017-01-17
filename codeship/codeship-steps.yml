@@ -1,0 +1,15 @@
+- type: serial
+  steps:
+    - name: print_env
+      tag: master
+      service: debug
+      command: printenv
+    - name: docker_push_to_gitlab
+      tag: master
+      service: app
+      type: push
+      image_name: registry.gitlab.com/pyar6329/elib-api
+      image_tag: "{{ .StringTime }}"
+      registry: registry.gitlab.com
+      encrypted_dockercfg_path: dockercfg.encrypted
+
