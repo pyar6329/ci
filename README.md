@@ -21,6 +21,6 @@ docker loginのtokenを生成するコマンド
 ```bash
 cd ci/codeship
 chmod u+x install_jet.sh
-./install_jet.sh
+DOCKER_REGISTRY="your registry host name" DOCKER_USER-"your user name" GITLAB_TOKEN="your token" ./install_jet.sh
 ```
 
