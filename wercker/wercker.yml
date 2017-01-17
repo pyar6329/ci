@@ -1,0 +1,93 @@
+box: ruby:2.3
+services:
+  - id: postgres
+    env:
+      POSTGRES_DB: elibtest
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+
+build:
+  steps:
+    - script:
+      name: apply environment variables
+      code: |
+        export CPU_CORES="$(cat /proc/cpuinfo | grep "cpu cores" | wc -l)"
+        export PATH="${WERCKER_SOURCE_DIR}/bin:${WERCKER_CACHE_DIR}/bundle-install/bin:${PATH}"
+    - bundle-install:
+      path: /pipeline/cache/bundle-install
+      binstubs: /pipeline/cache/bundle-install/bin
+      without: development production
+      jobs: ${CPU_CORES}
+    - script:
+      name: rspec
+      code: bundle exec rspec
+  after-steps:
+    - slack-notifier:
+      url: $SLACK_URL
+      channel: newsfeed
+      username: werckerbot
+
+deploy:
+  box:
+    id: ruby:2.3.3-alpine
+    cmd: /bin/sh
+  steps:
+    - script:
+      name: apply environment variables
+      code: |
+        export CPU_CORES="$(cat /proc/cpuinfo | grep "cpu cores" | wc -l)"
+    - script:
+      name: show docker version
+      code: |
+        echo "docker version: ${WERCKER_MAIN_PIPELINE_STARTED}, or ${WERCKER_GIT_COMMIT}"
+    - script:
+      name: install dockerize
+      code: |
+        DOCKERIZE_VERSION=v0.3.0
+        apk add --update --upgrade --no-cache --virtual .dockerize-packages ca-certificates wget
+        wget https://github.com/jwilder/dockerize/releases/download/${DOCKERIZE_VERSION}/dockerize-linux-amd64-${DOCKERIZE_VERSION}.tar.gz
+        tar -C /usr/local/bin -xzvf dockerize-linux-amd64-${DOCKERIZE_VERSION}.tar.gz
+        rm dockerize-linux-amd64-${DOCKERIZE_VERSION}.tar.gz
+        apk del .dockerize-packages
+    - script:
+      name: install runtime packages
+      code: |
+        apk add --update --upgrade --no-cache ruby-dev zlib-dev libxml2-dev libxml2-utils libxslt-dev tzdata yaml-dev readline-dev libpq bash
+    - script:
+      name: install build packages
+      code: |
+        apk add --update --upgrade --no-cache --virtual .build-packages openssl-dev ca-certificates wget curl-dev build-base alpine-sdk linux-headers paxctl make gcc g++ libgcc libstdc++ gnupg postgresql-dev git
+    - bundle-install:
+      path: /pipeline/cache/bundle-install
+      binstubs: /pipeline/cache/bundle-install/bin
+      without: development test
+      jobs: ${CPU_CORES}
+#    - script:
+#      name: copy apps
+#      code: |
+#        mkdir -p /usr/src
+#        cp -rf ${WERCKER_SOURCE_DIR} /usr/src/app
+#        rm -rf /usr/src/app/.git* /usr/src/app/.rspec /usr/src/app/README.md
+    - script:
+      name: copy docker-entrypoint.sh
+      code: |
+        wget "https://raw.githubusercontent.com/toshogakari/eLib-docker/master/api/builds/development/rails/docker-entrypoint.sh"
+        mv docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+        chmod u+x /usr/local/bin/docker-entrypoint.sh
+        which docker-entrypoint.sh
+    - script:
+      name: delete build packages
+      code: apk del .build-packages
+    - internal/docker-push:
+      disable-sync: true
+      username: ${DOCKER_USERNAME} # pyar6329
+      password: ${DOCKER_PASSWORD} # gitlab token
+      repository: ${DOCKER_REPO} # registry.gitlab.com/pyar6329/elib-api
+      registry: ${DOCKER_HOST} # https://registry.gitlab.com/v2
+      tag: ${WERCKER_MAIN_PIPELINE_STARTED}, ${WERCKER_GIT_COMMIT}, latest
+      author: "Tsukasa Arima"
+      ports: "9000"
+      entrypoint: /usr/local/bin/docker-entrypoint.sh
+      cmd: unicorn -c ${WERCKER_SOURCE_DIR}/config/unicorn.rb -E production -p 9000 -o 0.0.0.0
+      working-dir: ${WERCKER_SOURCE_DIR}
+      env: '"RAILS_ENV=production", "PATH=/pipeline/source/bin:/pipeline/cache/bundle-install/bin:/usr/local/bundle/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"'
